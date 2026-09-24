@@ -346,7 +346,11 @@ export interface ExtensionContext {
 	signal: AbortSignal | undefined;
 	/** Abort the current agent operation */
 	abort(): void;
-	/** Whether there are queued messages waiting */
+	/**
+	 * Whether user or custom steer/followUp messages are queued for the agent.
+	 * Excludes nextTurn and triggerTurn: false custom messages.
+	 * Snapshot only; does not guarantee another turn.
+	 */
 	hasPendingMessages(): boolean;
 	/** Gracefully shutdown pi and exit. Available in all contexts. */
 	shutdown(): void;

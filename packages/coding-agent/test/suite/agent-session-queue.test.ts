@@ -306,6 +306,7 @@ describe("AgentSession queue characterization", () => {
 		expect(getAssistantTexts(harness)).toEqual(["", "original turn complete", "batched follow-up response"]);
 	});
 
+	// Regression test for #8349.
 	it("queues custom messages with deliverAs steer while streaming", async () => {
 		const waiting = await createWaitingHarness();
 		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = waiting;
@@ -325,20 +326,31 @@ describe("AgentSession queue characterization", () => {
 			},
 		]);
 
+		const ctx = harness.session.extensionRunner.createContext();
 		await waitForToolStart;
-		await harness.session.sendCustomMessage(
-			{ customType: "queue-test", content: "steer custom", display: true, details: { value: 1 } },
-			{ deliverAs: "steer" },
-		);
-		releaseToolExecution();
-		await promptPromise;
+		try {
+			expect(ctx.hasPendingMessages()).toBe(false);
+			await harness.session.sendCustomMessage(
+				{ customType: "queue-test", content: "steer custom", display: true, details: { value: 1 } },
+				{ deliverAs: "steer" },
+			);
+			expect(harness.session.pendingMessageCount).toBe(0);
+			expect(harness.session.getSteeringMessages()).toEqual([]);
+			expect(harness.session.getFollowUpMessages()).toEqual([]);
+			expect(ctx.hasPendingMessages()).toBe(true);
+		} finally {
+			releaseToolExecution();
+			await promptPromise;
+		}
 
+		expect(ctx.hasPendingMessages()).toBe(false);
 		expect(sawCustomMessage).toBe(true);
 		expect(
 			harness.session.messages.some((message) => message.role === "custom" && message.customType === "queue-test"),
 		).toBe(true);
 	});
 
+	// Regression test for #8349.
 	it("queues custom messages with deliverAs followUp while streaming", async () => {
 		const waiting = await createWaitingHarness();
 		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = waiting;
@@ -359,18 +371,83 @@ describe("AgentSession queue characterization", () => {
 			},
 		]);
 
+		const ctx = harness.session.extensionRunner.createContext();
 		await waitForToolStart;
-		await harness.session.sendCustomMessage(
-			{ customType: "queue-test", content: "follow-up custom", display: true, details: { value: 1 } },
-			{ deliverAs: "followUp" },
-		);
-		releaseToolExecution();
-		await promptPromise;
+		try {
+			expect(ctx.hasPendingMessages()).toBe(false);
+			await harness.session.sendCustomMessage(
+				{ customType: "queue-test", content: "follow-up custom", display: true, details: { value: 1 } },
+				{ deliverAs: "followUp" },
+			);
+			expect(harness.session.pendingMessageCount).toBe(0);
+			expect(harness.session.getSteeringMessages()).toEqual([]);
+			expect(harness.session.getFollowUpMessages()).toEqual([]);
+			expect(ctx.hasPendingMessages()).toBe(true);
+		} finally {
+			releaseToolExecution();
+			await promptPromise;
+		}
 
+		expect(ctx.hasPendingMessages()).toBe(false);
 		expect(sawCustomMessage).toBe(true);
 		expect(
 			harness.session.messages.some((message) => message.role === "custom" && message.customType === "queue-test"),
 		).toBe(true);
+	});
+
+	// Regression test for #8349: context-only messages do not request another turn.
+	it.each([{ deliverAs: "nextTurn" as const }, { triggerTurn: false }])(
+		"does not report context-only custom messages as pending: %j",
+		async (options) => {
+			const { harness, waitForToolStart, promptPromise, releaseToolExecution } = await createWaitingHarness();
+			harnesses.push(harness);
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			const ctx = harness.session.extensionRunner.createContext();
+
+			await waitForToolStart;
+			try {
+				await harness.session.sendCustomMessage(
+					{ customType: "context-only", content: "context only", display: false },
+					options,
+				);
+				expect(harness.session.pendingMessageCount).toBe(0);
+				expect(ctx.hasPendingMessages()).toBe(false);
+			} finally {
+				releaseToolExecution();
+				await promptPromise;
+			}
+			expect(ctx.hasPendingMessages()).toBe(false);
+		},
+	);
+
+	// Regression test for #8349: user-text queue reporting must remain unchanged.
+	it.each(["steer", "followUp"] as const)("reports queued user %s messages until drained", async (deliverAs) => {
+		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = await createWaitingHarness();
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+			...(deliverAs === "followUp" ? [fauxAssistantMessage("followed up")] : []),
+		]);
+		const ctx = harness.session.extensionRunner.createContext();
+
+		await waitForToolStart;
+		try {
+			expect(ctx.hasPendingMessages()).toBe(false);
+			await harness.session[deliverAs]("queued user text");
+			expect(harness.session.pendingMessageCount).toBe(1);
+			expect(harness.session.getSteeringMessages()).toEqual(deliverAs === "steer" ? ["queued user text"] : []);
+			expect(harness.session.getFollowUpMessages()).toEqual(deliverAs === "followUp" ? ["queued user text"] : []);
+			expect(ctx.hasPendingMessages()).toBe(true);
+		} finally {
+			releaseToolExecution();
+			await promptPromise;
+		}
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(ctx.hasPendingMessages()).toBe(false);
 	});
 
 	it("injects nextTurn custom messages into the next prompt", async () => {
@@ -471,6 +548,31 @@ describe("AgentSession queue characterization", () => {
 		await expect(harness.session.followUp("/testcmd queued")).rejects.toThrow(
 			'Extension command "/testcmd" cannot be queued. Use prompt() or execute the command when not streaming.',
 		);
+	});
+
+	// Regression test for #8349: agent_end handlers can queue another run.
+	it.each(["steer", "followUp"] as const)("reports custom %s messages queued during agent_end", async (deliverAs) => {
+		const pendingStates: boolean[] = [];
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("agent_end", (_event, ctx) => {
+						if (pendingStates.length > 0) return;
+						pendingStates.push(ctx.hasPendingMessages());
+						pi.sendMessage({ customType: "queue-test", content: "continue", display: false }, { deliverAs });
+						pendingStates.push(ctx.hasPendingMessages());
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("reply"), fauxAssistantMessage("continued")]);
+
+		await harness.session.prompt("hello");
+
+		expect(pendingStates).toEqual([false, true]);
+		expect(getAssistantTexts(harness)).toEqual(["reply", "continued"]);
+		expect(harness.session.extensionRunner.createContext().hasPendingMessages()).toBe(false);
 	});
 
 	it("delivers follow-ups queued during agent_end", async () => {

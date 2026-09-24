@@ -2055,6 +2055,15 @@ export class AgentSession {
 		return this._steeringMessages.length + this._followUpMessages.length;
 	}
 
+	/**
+	 * Whether user or custom steer/followUp messages are queued for the agent.
+	 * Excludes nextTurn and triggerTurn: false custom messages.
+	 * Snapshot only; does not guarantee another turn.
+	 */
+	hasPendingMessages(): boolean {
+		return this.pendingMessageCount > 0 || this.agent.hasQueuedMessages();
+	}
+
 	/** Get pending steering messages (read-only) */
 	getSteeringMessages(): readonly string[] {
 		return this._steeringMessages;
@@ -3105,7 +3114,7 @@ export class AgentSession {
 					}
 					void this.abort();
 				},
-				hasPendingMessages: () => this.pendingMessageCount > 0,
+				hasPendingMessages: () => this.hasPendingMessages(),
 				shutdown: () => {
 					this._extensionShutdownHandler?.();
 				},

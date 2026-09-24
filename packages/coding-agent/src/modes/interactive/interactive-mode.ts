@@ -2163,7 +2163,7 @@ export class InteractiveMode {
 			abort: () => {
 				this.restoreQueuedMessagesToEditor({ abort: true });
 			},
-			hasPendingMessages: () => this.session.pendingMessageCount > 0,
+			hasPendingMessages: () => this.session.hasPendingMessages(),
 			shutdown: () => {
 				this.shutdownRequested = true;
 			},
