@@ -2,7 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, InputEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
 
 async function createWaitingHarness(
@@ -145,11 +145,18 @@ describe("AgentSession queue characterization", () => {
 			},
 		]);
 
+		const ctx = harness.session.extensionRunner.createContext();
 		await waitForToolStart;
-		await harness.session.followUp("after current run");
-		releaseToolExecution();
-		await promptPromise;
+		try {
+			expect(ctx.hasPendingMessages()).toBe(false);
+			await harness.session.followUp("after current run");
+			expect(ctx.hasPendingMessages()).toBe(true);
+		} finally {
+			releaseToolExecution();
+			await promptPromise;
+		}
 
+		expect(ctx.hasPendingMessages()).toBe(false);
 		expect(getUserTexts(harness)).toEqual(["start", "after current run"]);
 		expect(assistantSeenBeforeFollowUp).toContain("");
 		expect(getAssistantTexts(harness)).toContain("follow-up response");
@@ -423,31 +430,50 @@ describe("AgentSession queue characterization", () => {
 		},
 	);
 
-	// Regression test for #8349: user-text queue reporting must remain unchanged.
-	it.each(["steer", "followUp"] as const)("reports queued user %s messages until drained", async (deliverAs) => {
-		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = await createWaitingHarness();
+	// Regression test for #8349: a wait tool must wake on a custom message without external release.
+	it.each(["steer", "followUp"] as const)("wakes a polling tool on custom %s input", async (deliverAs) => {
+		let api!: ExtensionAPI;
+		let started!: () => void;
+		let woke = false;
+		const toolStarted = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					api = pi;
+					pi.registerTool({
+						name: "wait_for_input",
+						label: "Wait",
+						description: "Wait for queued input",
+						parameters: Type.Object({}),
+						execute: async (_id, _params, _signal, _onUpdate, ctx) => {
+							started();
+							expect(ctx.hasPendingMessages()).toBe(false);
+							await vi.waitFor(() => expect(ctx.hasPendingMessages()).toBe(true));
+							woke = true;
+							return { content: [{ type: "text", text: "input pending" }], details: {} };
+						},
+					});
+				},
+			],
+		});
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("wait_for_input", {}), { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
 			...(deliverAs === "followUp" ? [fauxAssistantMessage("followed up")] : []),
 		]);
-		const ctx = harness.session.extensionRunner.createContext();
 
-		await waitForToolStart;
+		const promptPromise = harness.session.prompt("start");
 		try {
-			expect(ctx.hasPendingMessages()).toBe(false);
-			await harness.session[deliverAs]("queued user text");
-			expect(harness.session.pendingMessageCount).toBe(1);
-			expect(harness.session.getSteeringMessages()).toEqual(deliverAs === "steer" ? ["queued user text"] : []);
-			expect(harness.session.getFollowUpMessages()).toEqual(deliverAs === "followUp" ? ["queued user text"] : []);
-			expect(ctx.hasPendingMessages()).toBe(true);
+			await toolStarted;
+			api.sendMessage({ customType: "queue-test", content: "please respond", display: false }, { deliverAs });
 		} finally {
-			releaseToolExecution();
 			await promptPromise;
 		}
-		expect(harness.session.pendingMessageCount).toBe(0);
-		expect(ctx.hasPendingMessages()).toBe(false);
+		// Tool errors become tool results, so completion alone would not prove it woke.
+		expect(woke).toBe(true);
 	});
 
 	it("injects nextTurn custom messages into the next prompt", async () => {
@@ -504,14 +530,21 @@ describe("AgentSession queue characterization", () => {
 			}
 		});
 
+		const ctx = harness.session.extensionRunner.createContext();
 		await waitForToolStart;
-		await harness.session.steer("queued");
-		expect(harness.session.pendingMessageCount).toBe(1);
-		releaseToolExecution();
-		await promptPromise;
+		try {
+			expect(ctx.hasPendingMessages()).toBe(false);
+			await harness.session.steer("queued");
+			expect(harness.session.pendingMessageCount).toBe(1);
+			expect(ctx.hasPendingMessages()).toBe(true);
+		} finally {
+			releaseToolExecution();
+			await promptPromise;
+		}
 
 		expect(countsAtQueuedMessageStart).toEqual([0]);
 		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(ctx.hasPendingMessages()).toBe(false);
 	});
 
 	it("throws when queueing an extension command with steer", async () => {
