@@ -2164,6 +2164,7 @@ export class InteractiveMode {
 				this.restoreQueuedMessagesToEditor({ abort: true });
 			},
 			hasPendingMessages: () => this.session.hasPendingMessages(),
+			hasPendingSteeringMessages: () => this.session.hasPendingSteeringMessages(),
 			shutdown: () => {
 				this.shutdownRequested = true;
 			},

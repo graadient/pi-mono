@@ -352,6 +352,12 @@ export interface ExtensionContext {
 	 * Snapshot only; does not guarantee another turn.
 	 */
 	hasPendingMessages(): boolean;
+	/**
+	 * Whether user or custom steer messages are queued for the agent.
+	 * Excludes followUp, nextTurn, and triggerTurn: false custom messages.
+	 * Snapshot only; does not guarantee another turn.
+	 */
+	hasPendingSteeringMessages(): boolean;
 	/** Gracefully shutdown pi and exit. Available in all contexts. */
 	shutdown(): void;
 	/** Get current context usage for the active model. */
@@ -1900,6 +1906,7 @@ export interface ExtensionContextActions {
 	getSignal: () => AbortSignal | undefined;
 	abort: () => void;
 	hasPendingMessages: () => boolean;
+	hasPendingSteeringMessages: () => boolean;
 	shutdown: () => void;
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;

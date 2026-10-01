@@ -326,6 +326,11 @@ export class Agent {
 		return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();
 	}
 
+	/** Returns true when the steering queue still contains pending messages. Ignores follow-up messages. */
+	hasQueuedSteeringMessages(): boolean {
+		return this.steeringQueue.hasItems();
+	}
+
 	/** Preview the messages selected for the next turn without consuming them. */
 	peekQueuedMessages(): AgentMessage[] {
 		const steering = this.steeringQueue.peek();

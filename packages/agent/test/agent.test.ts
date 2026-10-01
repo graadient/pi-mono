@@ -956,6 +956,26 @@ describe("Agent", () => {
 		expect(callbackContextRoles).toEqual(["system", "user", "assistant", "toolResult"]);
 	});
 
+	it("reports steering queue state independently of follow-up messages", () => {
+		const agent = new Agent({ streamFn: unusedStreamFunction });
+		expect(agent.hasQueuedSteeringMessages()).toBe(false);
+
+		agent.followUp(createUserMessage("follow-up"));
+		expect(agent.hasQueuedMessages()).toBe(true);
+		expect(agent.hasQueuedSteeringMessages()).toBe(false);
+
+		agent.steer(createUserMessage("steer"));
+		expect(agent.hasQueuedSteeringMessages()).toBe(true);
+
+		agent.clearSteeringQueue();
+		expect(agent.hasQueuedSteeringMessages()).toBe(false);
+		expect(agent.hasQueuedMessages()).toBe(true);
+
+		agent.steer(createUserMessage("user steer"));
+		agent.clearAllQueues();
+		expect(agent.hasQueuedSteeringMessages()).toBe(false);
+	});
+
 	it.each([
 		{ name: "empty", messages: [] },
 		{ name: "system-only", messages: [{ role: "system" as const, content: "system only", timestamp: 1 }] },
