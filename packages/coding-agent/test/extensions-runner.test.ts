@@ -103,7 +103,6 @@ describe("ExtensionRunner", () => {
 		getSignal: () => undefined,
 		abort: () => {},
 		hasPendingMessages: () => false,
-		hasPendingSteeringMessages: () => false,
 		shutdown: () => {},
 		getContextUsage: () => undefined,
 		compact: () => {},
@@ -124,30 +123,6 @@ describe("ExtensionRunner", () => {
 			const scoped = [{ model: { id: "scoped-test" }, thinkingLevel: "high" }] as unknown as ScopedModel[];
 			runner.bindCore(extensionActions, { ...extensionContextActions, getScopedModels: () => scoped });
 			expect(runner.createContext().scopedModels).toBe(scoped);
-		});
-	});
-
-	describe("pending messages", () => {
-		it("reads pending steering state through bindCore and rejects stale contexts", async () => {
-			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
-			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
-			const ctx = runner.createContext();
-			expect(ctx.hasPendingSteeringMessages()).toBe(false);
-
-			let steering = true;
-			runner.bindCore(extensionActions, {
-				...extensionContextActions,
-				hasPendingMessages: () => true,
-				hasPendingSteeringMessages: () => steering,
-			});
-			expect(ctx.hasPendingSteeringMessages()).toBe(true);
-			steering = false;
-			expect(ctx.hasPendingSteeringMessages()).toBe(false);
-			expect(ctx.hasPendingMessages()).toBe(true);
-
-			runner.invalidate("stale ctx");
-			expect(() => ctx.hasPendingSteeringMessages()).toThrow("stale ctx");
-			expect(() => ctx.hasPendingMessages()).toThrow("stale ctx");
 		});
 	});
 

@@ -51,7 +51,6 @@ describe("InteractiveMode pending messages", () => {
 		expect(shortcutContext.defaultEditor.onExtensionShortcut?.("\x1b[120;6u")).toBe(true);
 		expect(ctx).toBeDefined();
 		expect(ctx!.hasPendingMessages()).toBe(false);
-		expect(ctx!.hasPendingSteeringMessages()).toBe(false);
 
 		harness.session.agent[deliverAs]({
 			role: "custom",
@@ -63,10 +62,8 @@ describe("InteractiveMode pending messages", () => {
 
 		expect(harness.session.pendingMessageCount).toBe(0);
 		expect(ctx!.hasPendingMessages()).toBe(true);
-		expect(ctx!.hasPendingSteeringMessages()).toBe(deliverAs === "steer");
 		harness.session.clearQueue();
 		expect(ctx!.hasPendingMessages()).toBe(false);
-		expect(ctx!.hasPendingSteeringMessages()).toBe(false);
 		expect(shortcutContext.showError).not.toHaveBeenCalled();
 	});
 });
